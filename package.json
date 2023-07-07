@@ -8,5 +8,21 @@
     "createdAt": "2023-05-17T14:36:24.002Z",
     "version": "6.2.0",
     "commit": "6de8e2f7e38d779fd6845c63477977fb1eb3af99"
+  },
+  "dependencies": {
+    "axios": "^1.4.0",
+    "jsdom": "^22.1.0",
+    "markdown-it": "^13.0.1",
+    "node-fetch": "^3.3.1"
+  },
+  "scripts": {
+    "eslint": "eslint --ext .js test/",
+    "pretest": "npm run eslint",
+    "test": "jest --coverage"
+  },
+  "devDependencies": {
+    "eslint": "^8.43.0",
+    "jest": "^29.5.0",
+    "jest-fetch-mock": "^3.0.3"
   }
 }

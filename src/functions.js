@@ -3,197 +3,144 @@ const fs = require('fs');
 const { markAsUntransferable } = require('worker_threads');
 const { JSDOM } = require('jsdom');
 const MarkdownIt = require('markdown-it');
+const { error } = require('console');
+const axios = require('axios');
+
 
 // Valida el archivo
-const validateFile = (filePath => {
-    if (fs.existsSync(filePath)) {
-        console.log('El archivo existe:', filePath);
-    } else {
-        console.error('El archivo no existe:', filePath);
-    }
-});
-
-// Valida si la ruta es absoluta o relativa, en el último caso, la convierte
-const files = (filePath) => {
-    const isAbsolute = path.isAbsolute(filePath);
-    if (isAbsolute) {
-        console.log('La ruta es absoluta.');
-        console.log('Archivo a revisar:', filePath);
-        console.log(filePath);
-        validateFile(filePath);
-    } else {
-        console.log('La ruta es relativa.');
-        const absolutePath = path.join(__dirname, filePath);
-        console.log(absolutePath);
-        console.log('Archivo a revisar:', filePath);
-        validateFile(absolutePath);
-    }
-};
-
-// Revisa si es un directorio, si es, despliega los archivos dentro
-const readDirectory = (directoryPath) => {
-    try {
-        const files = fs.readdirSync(directoryPath);
-        console.log('Archivos en el directorio:', files);
-    } catch (error) {
-        console.error('Error al leer el directorio', error);
-    }
+function validateFile(filePath) {
+    return fs.existsSync(filePath);
 }
 
-//Lee el archivo
-const readTextFile = (filePath) => {
-    const currentFilePath = __filename;
-    const absolutePath = path.resolve(path.dirname(currentFilePath), filePath);
-    console.log(absolutePath);
-    fs.readFile(absolutePath, 'utf-8', (error, data) => {
-        if (error) {
-            console.error('Error al leer el archivo:', error);
-        } else {
-            console.log(data);
-        }
+// Valida si la ruta es absoluta 
+const isAbsolute = (filePath) => path.isAbsolute(filePath); //isAbsolute
+
+//Convierte la ruta relativa a absoluta
+const absolutePath = (filePath) => path.resolve(filePath);
+
+//Es un archivo
+const isAFile = (filePath) => {
+    return fs.statSync(filePath).isFile();
+};
+
+// Revisa si es un directorio
+const isADirectory = (filePath) => fs.statSync(filePath).isDirectory();
+
+//Leer archivos de un directorio de manera recursiva. si se encuentra un subdirectorio dentro del directorio actual, se llama recursivamente a la función readDirectory para obtener los archivos Markdown dentro del subdirectorio. Luego, los archivos encontrados tanto en el directorio actual como en los subdirectorios se agregan al mismo array (arrayMd). Al final, se resuelve la promesa con el array completo.
+const readDirectory = (filePath) => {
+    return new Promise ((resolve, reject) =>{
+        fs.readdir(filePath, "utf-8", (error, routes) =>{
+            if (error){
+                reject(error);
+            } else{
+                const arrayMd = [];
+                routes.forEach((file) =>{
+                    const fileAbsolutePath = path.join(filePath, file);
+                    if (fs.statSync(fileAbsolutePath).isFile() && validateMd(fileAbsolutePath)){
+                        arrayMd.push(fileAbsolutePath);
+                    }
+
+                        else if (isADirectory(fileAbsolutePath)){
+                            const subdirectoryFiles =readDirectory(fileAbsolutePath);
+                            arrayMd.push(...subdirectoryFiles);
+                        }
+                });
+                resolve(arrayMd);
+                console.log(arrayMd, 'Estos son los archivos Markdown');
+            }
+        });
     });
 };
 
+//Lee el archivo
+const readTextFile = (filePath) => {
+    return new Promise((resolve, reject) => {
+        fs.readFile(filePath, 'utf-8', (error, data) => {
+            if (error) {
+                reject(error);
+            } else {
+                resolve(data);  
+            }
+    });
+});
+};
+
 // Valida si la extensión es .md
-const validateMd = (filePath) => {
+const validateMd = (filePath) => { 
     const extension = path.extname(filePath);
-    console.log(extension);
     if (extension === '.md') {
-        console.log('Es un archivo Markdown.');
+        return true;
     } else {
-        console.log('No es un archivo Markdown');
+        return false;
     }
 };
 
 // Revisa si hay links dentro del archivo y los extrae 
-const extractLinks = (filePath, fileName) => {
-    fs.readFile(filePath, 'utf-8', (error, mdContent) => {
-        if (error) {
-            console.error('Error al leer el archivo:', error);
-        } else {
-            const allLinks = [];
-            const mdRender = new MarkdownIt();
-            const renderHtml = mdRender.render(mdContent);
-            const dom = new JSDOM(renderHtml);
-            const { document } = dom.window;
-            const links = document.querySelectorAll('a');
-
-            links.forEach((link) => {
-                const href = link.getAttribute('href');
-                const text = link.textContent.slice(0, 50);
-                if (href.startsWith('https://') || href.startsWith('http://')) {
-                    allLinks.push({ href, text, fileName });
-                }
+const extractLinks = (data, fileName) =>{
+    const allLinks = [];
+    const mdRender = MarkdownIt();
+    const renderHtml = mdRender.render(data);
+    const dom = new JSDOM(renderHtml);
+    const { document } = dom.window;
+    const links = document.querySelectorAll('a');
+    links.forEach((link) => {
+        const href = link.getAttribute('href');
+        const text = link.textContent.slice(0, 50);
+        if (href.startsWith('https://') || href.startsWith('http://')) {
+            allLinks.push({ 
+                Ruta: fileName,
+                Texto: text, 
+                Link: href
             });
-            console.log(allLinks);
-            //return allLinks;
         }
-
     });
+    return (allLinks);
+
 };
 
-// Verifica los links
+// Verifica si son vàlidos los links
 const verifyLinks = (links) => {
-    console.log(links);
     const arrayPromise = links.map((link) => {
         return new Promise((resolve, reject) => {
-            fetch(link.href)
+            axios
+                .get(link.Link)
                 .then((response) =>{
-                    const result ={
-                        Ruta:link.fileName,
-                        Texto: link.text,
-                        Link: link.href,
-                        Codigo: response.status === 200 ? 200 : 404,
-                        Estado: response.status === 200 ? 'OK' : 'FAIL',
+                    const arrayResult ={
+                        Ruta:link.Ruta,
+                        Texto: link.Texto,
+                        Link: link.Link,
+                        Codigo: response.status, //=== 200 ? 200 : 404,
+                        Estado: response.statusText //=== 200 ? 'OK' : 'FAIL',
                     };
-                    resolve(result);
+                    resolve(arrayResult);
                 })
                 .catch((error) =>{
-                    const result = {
-                        Ruta: link.fileName,
-                        Texto: link.text,
-                        Link:link.href,
-                        Codigo: error.name,
-                        Estado: error.message, 
+                    const arrayResult = {
+                        Ruta: link.Ruta,
+                        Texto: link.Texto,
+                        Link:link.Link,
+                        //Codigo: error.name,
+                        Codigo: null,
+                        Estado: 'No se pudo acceder al enlace', 
                     };
-                    resolve(result);
+                        resolve(arrayResult);
+                        //reject(arrayResult);
                 });
         });
     });
+    
     return Promise.all(arrayPromise);
 };
-
-// const verifyLinks2 = (links) => {
-//     if (!Array.isArray(links)) {
-//         return Promise.reject(new Error('Invalid links array'));
-//     }
-//     return Promise.all(links.map((link) => fetch(link.href)
-//         .then((response) => {
-//             const result = {
-//                 Ruta: link.file,
-//                 Texto: link.text,
-//                 Link: link.href,
-//                 Codigo: response.status === 200 ? 200 : 404,
-//                 Estado: response.status === 200 ? 'OK' : 'FAIL',
-//             };
-//             return result;
-//             console.log(result);
-//         })
-//         .catch((error) => {
-//             const result = {
-//                 Ruta: link.file,
-//                 Texto: link.text,
-//                 Link: link.href,
-//                 Codigo: error.name,
-//                 Estado: error.message,
-//             };
-//             return result;
-//             console.log(result);
-//         })
-//     )
-//     );
-// };
-
-validateFile('C:/Users/cuc22/Documents/Laboratoria/MD-Links/DEV006-md-links/src/index.js');
-files('C:/Users/cuc22/Documents/Laboratoria/MD-Links/DEV006-md-links/src/index.js');
-files('index.js');
-readTextFile('text.txt');
-readTextFile('C:/Users/cuc22/Documents/Laboratoria/MD-Links/DEV006-md-links/src/prueba.md');
-validateMd('C:/Users/cuc22/Documents/Laboratoria/MD-Links/DEV006-md-links/src/prueba.md');
-readDirectory('./pruebas');
-extractLinks('C:/Users/cuc22/Documents/Laboratoria/MD-Links/DEV006-md-links/src/pruebas/prueba2.md', 'C:/Users/cuc22/Documents/Laboratoria/MD-Links/DEV006-md-links/src/pruebas/prueba2.md')
-// .then((links) => {
-//     verifyLinks(links);
-// })
-// .then((results) => {
-//     console.log(results);
-// })
-// .catch((error) => {
-//     console.error(error)
-// });
-const arrayLinks = [{
-    href: 'https://nodejs.org/es/',
-    text: 'Node.js',
-    fileName: 'C:/Users/cuc22/Documents/Laboratoria/MD-Links/DEV006-md-links/src/pruebas/prueba2.md'},
-{
-    href: 'https://developers.google.com/v8/',
-    text: 'motor de JavaScript V8 de Chrome',
-    fileName: 'C:/Users/cuc22/Documents/Laboratoria/MD-Links/DEV006-md-links/src/pruebas/prueba2.md'}
-];
-
-verifyLinks(arrayLinks)
-  .then((results) => {
-    console.log(results);
-  })
-  .catch((error) => {
-    console.error(error);
-  });
 
 module.exports = {
             validateFile,
             readTextFile,
-            files,
+            isAFile,
+            isAbsolute,
+            absolutePath,
             validateMd,
+            isADirectory,
             readDirectory,
             extractLinks,
+            verifyLinks
         };
